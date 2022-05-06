@@ -1,0 +1,562 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "AWS CloudFormation template will create Amazon Athena Database, Amazon Athena tables,  s3 bucket ,and lambda function with necessary permissions ",
+    "Parameters": {
+        "flowlogsbucket": {
+            "Type": "String",
+            "Default": "s3://<vpcflowlogbucket>",
+            "Description": " This is the bucket where your vpc flow logs destination is set.Format is S3://vpcflowlogbucket",
+            "AllowedPattern": ".+"
+        },
+        "projectionstartdate": {
+            "Type": "String",
+            "Default": "2020/01/01",
+            "Description": " This is the projection timestamp start date needed for Athena. Provide the starting date from which you want to query flow logs. Format following yyyy/MM/dd, eg 2020/01/01",
+            "AllowedPattern": ".+"
+        }
+    },
+    "Resources": {
+        "CFNIAMRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                }
+            }
+        },
+        "IAMRolePolicies": {
+            "Type": "AWS::IAM::Policy",
+            "Properties": {
+                "PolicyName": "S3BucketKeyPOCpolicy",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "S3Access",
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:DeleteObject",
+                                "s3:PutObject",
+                                "s3:GetObject"
+                            ],
+                            "Resource": [
+                                {
+                                    "Fn::GetAtt": [
+                                        "CFNS3Bucket",
+                                        "Arn"
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                },
+                "Roles": [
+                    {
+                        "Ref": "CFNIAMRole"
+                    }
+                ]
+            }
+        },
+        "CFNS3Bucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketEncryption": {
+                    "ServerSideEncryptionConfiguration": [
+                        {
+                            "ServerSideEncryptionByDefault": {
+                                "SSEAlgorithm": "AES256"
+                            }
+                        }
+                    ]
+                },
+                "PublicAccessBlockConfiguration":
+                {
+                    "BlockPublicAcls": "true",
+                    "BlockPublicPolicy":"true",
+                    "IgnorePublicAcls":"true",
+                    "RestrictPublicBuckets":"true"
+                }
+            }
+        },
+        "CFNS3BucketPolicy": {
+            "Type": "AWS::S3::BucketPolicy",
+            "Properties": {
+                "Bucket": {
+                    "Ref": "CFNS3Bucket"
+                },
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "AWS": {
+                                    "Fn::GetAtt": [
+                                        "CFNIAMRole",
+                                        "Arn"
+                                    ]
+                                }
+                            },
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:PutObject",
+                                "s3:PutObjectAcl"
+                            ],
+                            "Resource": {
+                                "Fn::Join": [
+                                    "/",
+                                    [
+                                        {
+                                            "Fn::GetAtt": [
+                                                "CFNS3Bucket",
+                                                "Arn"
+                                            ]
+                                        },
+                                        "*"
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "MyLambdaFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "FunctionName": "cidr_ip_generator",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "CFNIAMRole",
+                        "Arn"
+                    ]
+                },
+                "Code": {
+                    "ZipFile": {
+                        "Fn::Join": [
+                            "\n",
+                            [
+                                "",
+                                "'''",
+                                "This sample, non-production-ready template.",
+                                "(c) 2021 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.  ",
+                                "This AWS Content is provided subject to the terms of the AWS Customer Agreement available at  ",
+                                "http://aws.amazon.com/agreement or other written agreement between Customer and either",
+                                "Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both.",
+                                "'''",
+                                "import ipaddress",
+                                "import boto3",
+                                "import os",
+                                "from botocore.exceptions import ClientError",
+                                "import json",
+                                "",
+                                "",
+                                "def csv_output_writer(ip_ranges, cidr, s3_bucket_path):",
+                                "    if len(ip_ranges) > 0:",
+                                "        try:",
+                                "            file_name = \"{}.csv\".format(get_cidr_str(cidr))",
+                                "            file_full_path = \"/tmp/{}\".format(file_name)",
+                                "            print(\"Generating File -->{}\".format(file_name))",
+                                "            f = open(file_full_path, \"w\")",
+                                "            for ip in ip_ranges:",
+                                "                row = cidr+\",\"+ip+\"\\n\"",
+                                "                f.write(row)",
+                                "            f.close()",
+                                "            # If S3 object_name was not specified, use file_name",
+                                "",
+                                "        # Upload the file",
+                                "            upload_file_to_s3(file_full_path, s3_bucket_path, file_name)",
+                                "        except ClientError as e:",
+                                "            print(e)",
+                                "",
+                                "        except IOError:",
+                                "            print(\"I/O error {}\".format(IOError))",
+                                "        finally:",
+                                "            print(\"process completed\")",
+                                "    else:",
+                                "        print(\"There is records found.\")",
+                                "",
+                                "",
+                                "def upload_file_to_s3(file_to_upload, s_bucket_path, file_name):",
+                                "    s3_client = boto3.client('s3')",
+                                "    s3_client.upload_file(file_to_upload, s_bucket_path, file_name)",
+                                "",
+                                "",
+                                "def get_ipranges(cidr):",
+                                "    ip_list = []",
+                                "    try:",
+                                "        ip_list = [str(ip) for ip in ipaddress.ip_network(cidr, False).hosts()]",
+                                "    except ValueError:",
+                                "        raise Exception(",
+                                "            \"Incorrect CIDR block . Please enter CIDR block in correct format like 10.0.1.0/16\")",
+                                "    return ip_list",
+                                "",
+                                "",
+                                "def get_cidr_str(cidr):",
+                                "    return cidr.replace(\".\", \"_\").replace(\"/\", \"_\")",
+                                "",
+                                "",
+                                "def process_cidr(cidr, s3_bucket_path):",
+                                "    csv_output_writer(get_ipranges(cidr), cidr, s3_bucket_path)",
+                                "",
+                                "",
+                                "def lambda_handler(event, context):",
+                                "    cidr = None",
+                                "    try:",
+                                "        cidr = event['cidr']",
+                                "    except KeyError:",
+                                "        raise Exception(",
+                                "            \"Please provide 'cidr' parameter as JSON String \")",
+                                "",
+                                "    s3_bucket = os.environ['s3_bucket']",
+                                "    process_cidr(cidr, s3_bucket)",
+                                "    message = 'CIDR block {} processed . Result upload on S3 Bucket  {}!'.format(",
+                                "        cidr, s3_bucket)",
+                                "    return {",
+                                "        'statusCode': 200,",
+                                "        'body': json.dumps(message)",
+                                "    }"
+                            ]
+                        ]
+                    }
+                },
+                "Environment": {
+                    "Variables": {
+                        "s3_bucket": {
+                            "Ref": "CFNS3Bucket"
+                        }
+                    }
+                },
+                "Runtime": "python3.9",
+                "Timeout": 600,
+                "Handler": "index.lambda_handler",
+                "MemorySize": 512
+            }
+        },
+        "VpcFlowLogsAthenaDatabase": {
+            "Type": "AWS::Glue::Database",
+            "Properties": {
+                "DatabaseInput": {
+                    "Name": "vpcflowlogscidrdb"
+                },
+                "CatalogId": {
+                    "Ref": "AWS::AccountId"
+                }
+            }
+        },
+        "CidrAthenaTable": {
+            "Type": "AWS::Glue::Table",
+            "Properties": {
+                "CatalogId": {
+                    "Ref": "AWS::AccountId"
+                },
+                "DatabaseName": {
+                    "Ref": "VpcFlowLogsAthenaDatabase"
+                },
+                "TableInput": {
+                    "Description": "This table has the schema for CIDR-IP mapping S3 bucket",
+                    "Name": "cidrtable",
+                    "TableType": "EXTERNAL_TABLE",
+                    "StorageDescriptor": {
+                        "Location": {
+                            "Fn::Join": [
+                                "",
+                                [
+                                    "s3://",
+                                    {
+                                        "Ref": "CFNS3Bucket"
+                                    },
+                                    "/"
+                                ]
+                            ]
+                        },
+                        "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+                        "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+                        "SerdeInfo": {
+                            "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe",
+                            "Parameters": {
+                                "field.delim": ",",
+                                "serialization.format": ",",
+                                "classification": "csv"
+                            }
+                        },
+                        "Columns": [
+                            {
+                                "Name": "cidr",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "ip",
+                                "Type": "string"
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+        "VpcFlowLogsAthenaTable": {
+            "Type": "AWS::Glue::Table",
+            "Properties": {
+                "CatalogId": {
+                    "Ref": "AWS::AccountId"
+                },
+                "DatabaseName": {
+                    "Ref": "VpcFlowLogsAthenaDatabase"
+                },
+                "TableInput": {
+                    "Description": "This table has the schema for VPCFlowLogs subscription",
+                    "Name": "vpcflowlogstable",
+                    "PartitionKeys": [
+                        {
+                            "Name": "region",
+                            "Type": "string"
+                        },
+                        {
+                            "Name": "day",
+                            "Type": "string"
+                        }
+                    ],
+                    "Parameters": {
+                        "skip.header.line.count": "1",
+                        "EXTERNAL": "true",
+                        "projection.region.type": "enum",
+                        "projection.day.type": "date",
+                        "projection.enabled": "true",
+                        "projection.day.format": "yyyy/MM/dd",
+                        "projection.region.values": {
+                            "Ref": "AWS::Region"
+                        },
+                        "projection.day.range": {
+                            "Fn::Join": [
+                                ",",
+                                [
+                                    {
+                                        "Ref": "projectionstartdate"
+                                    },
+                                    "NOW"
+                                ]
+                            ]
+                        },
+                        "storage.location.template": {
+                            "Fn::Join": [
+                                "/",
+                                [
+                                    {
+                                        "Ref": "flowlogsbucket"
+                                    },
+                                    "AWSLogs",
+                                    {
+                                        "Ref": "AWS::AccountId"
+                                    },
+                                    "vpcflowlogs",
+                                    "${region}/${day}"
+                                ]
+                            ]
+                        }
+                    },
+                    "TableType": "EXTERNAL_TABLE",
+                    "StorageDescriptor": {
+                        "Location": {
+                            "Fn::Join": [
+                                "/",
+                                [
+                                    {
+                                        "Ref": "flowlogsbucket"
+                                    },
+                                    "AWSLogs",
+                                    {
+                                        "Ref": "AWS::AccountId"
+                                    },
+                                    "vpcflowlogs"
+                                ]
+                            ]
+                        },
+                        "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+                        "OutputFormat": "org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat",
+                        "SerdeInfo": {
+                            "Parameters": {
+                                "field.delim": " ",
+                                "serialization.format": " "
+                            },
+                            "SerializationLibrary": "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"
+                        },
+                        "Columns": [
+                            {
+                                "Name": "version",
+                                "Type": "int"
+                            },
+                            {
+                                "Name": "account_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "interface_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "srcaddr",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "dstaddr",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "srcport",
+                                "Type": "int"
+                            },
+                            {
+                                "Name": "dstport",
+                                "Type": "int"
+                            },
+                            {
+                                "Name": "protocol",
+                                "Type": "bigint"
+                            },
+                            {
+                                "Name": "packets",
+                                "Type": "bigint"
+                            },
+                            {
+                                "Name": "bytes",
+                                "Type": "bigint"
+                            },
+                            {
+                                "Name": "start",
+                                "Type": "bigint"
+                            },
+                            {
+                                "Name": "end",
+                                "Type": "bigint"
+                            },
+                            {
+                                "Name": "action",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "log_status",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "vpc_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "subnet_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "instance_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "tcp_flags",
+                                "Type": "int"
+                            },
+                            {
+                                "Name": "type",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "pkt_srcaddr",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "pkt_dstaddr",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "region_name",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "az_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "sublocation_type",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "sublocation_id",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "pkt_src_aws_service",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "pkt_dst_aws_service",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "flow_direction",
+                                "Type": "string"
+                            },
+                            {
+                                "Name": "traffic_path",
+                                "Type": "int"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    },
+    "Outputs": {
+        "S3BUCKETAWSKMS": {
+            "Value": {
+                "Ref": "CFNS3Bucket"
+            },
+            "Description": "S3 Bucket where lambda function will generate range of IP address."
+        },
+        "CFNIAMRoleOut": {
+            "Value": {
+                "Fn::GetAtt": [
+                    "CFNIAMRole",
+                    "Arn"
+                ]
+            }
+        },
+        "LambdaFnOut": {
+            "Value": {
+                "Ref": "MyLambdaFunction"
+            },
+            "Description": "Lambda function to generate range of IP address Corresponding to CIDR block "
+        },
+        "VpcFlowLogsAthenaDatabase": {
+            "Value": {
+                "Ref": "VpcFlowLogsAthenaDatabase"
+            },
+            "Description": "Amazon Athena Database"
+        },
+        "CidrsAthenaTableOut": {
+            "Value": {
+                "Ref": "CidrAthenaTable"
+            },
+            "Description": "Athena Table with schema matching the CIDR-IP mapping file to enable querying"
+        }
+    }
+}
