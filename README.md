@@ -22,7 +22,7 @@ Finally, we’ll show how to analyze the traffic coming to and going from the ta
 [Follow the instruction here](setup/InstructionGuide.md)
 
 # Cloudformation template
-[Download the CFN](cfn_vpcflowlogs-cidr.json) 
+[Download the CFN](https://github.com/aws-samples/vpc-cidr-analysis/blob/main/cfn_vpcflowlogs_cidr.json) 
 
 # License
 This library is licensed under the MIT-0 License. See the LICENSE file.
